@@ -1,5 +1,6 @@
 import itertools
 import os
+from typing import Optional
 
 import regex as re
 
@@ -19,34 +20,23 @@ def create_vocab():
     # print(vocab)
     return (vocab_set, vocab)
 
-def pre_tokenize(text_input):
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    pre_tokenized_words = (re.findall(PAT, text_input))
-    # pre_tokenized_words = (text_input.split(" "))
-    #print(pre_tokenized_words)
-    return pre_tokenized_words
-
-def token_encode(pre_tokenized_words):
-    utf_encoded = [x.encode("utf-8") for x in pre_tokenized_words] 
-    #print(utf_encoded)
-    return utf_encoded
-
 def token_frequencies(frequencies, utf_encoded) -> dict[tuple[bytes, ...], int]:
-    for i in utf_encoded:
-        key = tuple([bytes([b]) for b in i])
-        if key in frequencies.keys():
-            count = frequencies[key]
-            frequencies[key] = count + 1
-        else:
-            frequencies[key] = 1
+    key = tuple([bytes([b]) for b in utf_encoded])
+    if key in frequencies.keys():
+        count = frequencies[key]
+        frequencies[key] = count + 1
+    else:
+        frequencies[key] = 1
     #print(frequencies)
     return frequencies
 
-def merges(frequencies):
-    bp_freq: dict[tuple[bytes, ...], int] = {}
+def merges(bp_freq, frequencies):
+    
     max_count = 0
     max_token = (b"0", b"0")
     for token in frequencies.keys():
+        # if (new_token and new_token not in token):
+        #     continue
         #print(token)
         no_appearances = frequencies[token]
         token_bytes = [b for b in token]
@@ -56,21 +46,16 @@ def merges(frequencies):
             s = token_bytes[i + 1]
             ##print(f, s)
 
+            count = 0
             if (f, s) in bp_freq.keys():
                 count = bp_freq[(f, s)]
-                bp_freq[(f, s)] = count + no_appearances
-                if ((count + no_appearances) > max_count):
-                    max_count = count + no_appearances
-                    max_token = (f, s)
-                elif ((count + no_appearances) == max_count):
-                    max_token = max(max_token, (f, s))
-            else: 
-                bp_freq[(f, s)] = no_appearances
-                if (no_appearances > max_count):
-                    max_count = no_appearances
-                    max_token = (f, s)
-                elif ((no_appearances) == max_count):
-                    max_token = max(max_token, (f, s))
+            bp_freq[(f, s)] = count + no_appearances
+            if ((count + no_appearances) > max_count):
+                max_count = count + no_appearances
+                max_token = (f, s)
+            elif ((count + no_appearances) == max_count):
+                max_token = max(max_token, (f, s))
+
             i += 1
     #print(max_count, max_token)
     #print(bp_freq)
@@ -79,6 +64,47 @@ def merges(frequencies):
     (f, s) = max_f, max_s
     new_token = (max_f + max_s)
     #print("NEW TOKEN ADDED " + ("" + max_f + max_s))
+    return (f, s, new_token, max_count)
+
+def new_merges(bp_freq, frequencies, new_token, old_f, old_s):
+    max_count = 0
+    max_token = (b"0", b"0")
+    del bp_freq[(old_f, old_s)]
+    for token in frequencies.keys():
+        no_appearances = frequencies[token]
+        token_bytes = [b for b in token]
+        i = 0
+        while i < len(token_bytes):
+            if (token_bytes[i] == new_token):
+                if (i - 1 >= 0 and token_bytes[i - 1] != new_token):
+                    f = token_bytes[i - 1]
+                    if ((f, old_f) in bp_freq):
+                        bp_freq[(f, old_f)] -= no_appearances
+                    s = token_bytes[i]
+                    count = bp_freq.get((f, s), 0)
+                    bp_freq[(f, s)] = count + no_appearances
+                if (i + 1 < len(token_bytes)):
+                    s = token_bytes[i + 1]
+                    if (s == new_token):
+                        if ((old_s, old_f) in bp_freq):
+                            bp_freq[(old_s, old_f)] -= no_appearances
+                    else:
+                        if ((old_s, s) in bp_freq):
+                            bp_freq[(old_s, s)] -= no_appearances
+                    f = token_bytes[i]
+                    count = bp_freq.get((f, s), 0)
+                    bp_freq[(f, s)] = count + no_appearances
+            i += 1
+    for key in bp_freq.keys():
+        val = bp_freq[key]
+        if (val > max_count):
+            max_count = val
+            max_token = key
+        elif(val == max_count):
+            max_token = max(max_token, key)
+    (max_f, max_s) = max_token
+    (f, s) = max_f, max_s
+    new_token = (max_f + max_s)
     return (f, s, new_token, max_count)
 
 def new_vocab(frequencies, f, s, new_token):
@@ -128,13 +154,23 @@ def run_tokenizer(input_path: str | os.PathLike, vocab_size: int, special_tokens
 
             for chunk in sub_chunks:
                 # print(chunk)
+                PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+                matches = (re.finditer(PAT, chunk))
+                for match in matches:
+                    elem = match.group()
+                    utf_encoded = elem.encode("utf-8")
+                    frequencies = token_frequencies(frequencies, utf_encoded)
 
-                pre_tokenized_words = pre_tokenize(chunk)
-                utf_encoded = token_encode(pre_tokenized_words)
-                frequencies = token_frequencies(frequencies, utf_encoded)
-
+        bp_freq: dict[tuple[bytes, ...], int] = {}
+        # new_token_m = None
+        t = True
         while True:
-            (first, second, new_token, max_count) = merges(frequencies)
+            if (t):
+                bp_freq: dict[tuple[bytes, ...], int] = {}
+                (first, second, new_token, max_count) = merges(bp_freq, frequencies)
+                t = False
+            else:
+                (first, second, new_token, max_count) = new_merges(bp_freq, frequencies, n, f, s)
             if (max_count <= 1 or size_vocab >= vocab_size):
                 break
             frequencies = new_vocab(frequencies, first, second, new_token)
@@ -144,6 +180,9 @@ def run_tokenizer(input_path: str | os.PathLike, vocab_size: int, special_tokens
                 vocab_set.add((new_token,))
                 vocab[size_vocab] = new_token
                 size_vocab += 1
+                n = new_token
+                f = first
+                s = second
 
                     # print(frequencies)
     # print(vocab)
