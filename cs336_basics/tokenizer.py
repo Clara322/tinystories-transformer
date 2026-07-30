@@ -128,6 +128,31 @@ def new_vocab(frequencies, f, s, new_token):
     return frequencies
 
 
+from multiprocessing import Pool
+
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
+
+def process_chunk(args):
+    file_path, start, end, special_tokens = args
+
+    with open(file_path, "rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+
+    if special_tokens:
+        pattern = "|".join(re.escape(tok) for tok in special_tokens)
+        sub_chunks = re.split(pattern, chunk)
+    else:
+        sub_chunks = [chunk]
+
+    frequencies: dict[tuple[bytes, ...], int] = {}
+    for sub_chunk in sub_chunks:
+        for match in re.finditer(PAT, sub_chunk):
+            utf_encoded = match.group().encode("utf-8")
+            frequencies = token_frequencies(frequencies, utf_encoded)
+    return frequencies
+
 def run_tokenizer(input_path: str | os.PathLike, vocab_size: int, special_tokens: list[str]):
     text_input = "low low low low low lower lower widest widest widest newest newest newest newest newest newest"
 
@@ -135,34 +160,23 @@ def run_tokenizer(input_path: str | os.PathLike, vocab_size: int, special_tokens
     merges_list: list[tuple[bytes, bytes]] = []
     size_vocab = len(vocab_set)
 
+    num_processes = 4
+
     with open(input_path, "rb") as f:
-        num_processes = 4
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
 
-        # The following is a serial implementation, but you can parallelize this
-        # by sending each start/end pair to a set of processes.
-        
+        tasks = [
+            (input_path, start, end, special_tokens)
+            for start, end in zip(boundaries[:-1], boundaries[1:])
+        ]
+
         frequencies: dict[tuple[bytes, ...], int] = {}
-
-        for start, end in zip(boundaries[:-1], boundaries[1:]):
-            if (size_vocab >= vocab_size):
-                break
-            f.seek(start)
-            chunk = f.read(end - start).decode("utf-8", errors="ignore")
-            pattern = "|".join(re.escape(token) for token in special_tokens)
-            sub_chunks = re.split(pattern, chunk)
-
-            for chunk in sub_chunks:
-                # print(chunk)
-                PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-                matches = (re.finditer(PAT, chunk))
-                for match in matches:
-                    elem = match.group()
-                    utf_encoded = elem.encode("utf-8")
-                    frequencies = token_frequencies(frequencies, utf_encoded)
+        with Pool(num_processes) as pool:
+            for partial in pool.map(process_chunk, tasks):
+                for key, count in partial.items():
+                    frequencies[key] = frequencies.get(key, 0) + count
 
         bp_freq: dict[tuple[bytes, ...], int] = {}
-        # new_token_m = None
         t = True
         while True:
             if (t):
@@ -184,9 +198,6 @@ def run_tokenizer(input_path: str | os.PathLike, vocab_size: int, special_tokens
                 f = first
                 s = second
 
-                    # print(frequencies)
-    # print(vocab)
-    # print(merges_list)
     return (vocab, merges_list)
 
 
