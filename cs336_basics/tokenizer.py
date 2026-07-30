@@ -128,8 +128,6 @@ def new_vocab(frequencies, f, s, new_token):
     return frequencies
 
 
-from multiprocessing import Pool
-
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 
@@ -147,11 +145,15 @@ def process_chunk(args):
         sub_chunks = [chunk]
 
     frequencies: dict[tuple[bytes, ...], int] = {}
+
     for sub_chunk in sub_chunks:
         for match in re.finditer(PAT, sub_chunk):
             utf_encoded = match.group().encode("utf-8")
             frequencies = token_frequencies(frequencies, utf_encoded)
+
     return frequencies
+
+from concurrent import futures
 
 def run_tokenizer(input_path: str | os.PathLike, vocab_size: int, special_tokens: list[str]):
     text_input = "low low low low low lower lower widest widest widest newest newest newest newest newest newest"
@@ -165,44 +167,43 @@ def run_tokenizer(input_path: str | os.PathLike, vocab_size: int, special_tokens
     with open(input_path, "rb") as f:
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
 
-        tasks = [
-            (input_path, start, end, special_tokens)
-            for start, end in zip(boundaries[:-1], boundaries[1:])
-        ]
+    tasks = [
+        (input_path, start, end, special_tokens)
+        for start, end in zip(boundaries[:-1], boundaries[1:])
+    ]
 
-        frequencies: dict[tuple[bytes, ...], int] = {}
-        with Pool(num_processes) as pool:
-            for partial in pool.map(process_chunk, tasks):
-                for key, count in partial.items():
-                    frequencies[key] = frequencies.get(key, 0) + count
-
-        bp_freq: dict[tuple[bytes, ...], int] = {}
-        t = True
-        while True:
-            if (t):
-                bp_freq: dict[tuple[bytes, ...], int] = {}
-                (first, second, new_token, max_count) = merges(bp_freq, frequencies)
-                t = False
-            else:
-                (first, second, new_token, max_count) = new_merges(bp_freq, frequencies, n, f, s)
-            if (max_count <= 1 or size_vocab >= vocab_size):
-                break
-            frequencies = new_vocab(frequencies, first, second, new_token)
-            merges_list.append((first, second))
+    frequencies: dict[tuple[bytes, ...], int] = {}
+    with futures.ProcessPoolExecutor(max_workers=num_processes) as pool:
+        for partial in pool.map(process_chunk, tasks):
+            for key, count in partial.items():
+                frequencies[key] = frequencies.get(key, 0) + count
     
-            if ((new_token,) not in vocab_set):
-                vocab_set.add((new_token,))
-                vocab[size_vocab] = new_token
-                size_vocab += 1
-                n = new_token
-                f = first
-                s = second
+    bp_freq: dict[tuple[bytes, ...], int] = {}
+    t = True
+    while True:
+        if (t):
+            bp_freq: dict[tuple[bytes, ...], int] = {}
+            (first, second, new_token, max_count) = merges(bp_freq, frequencies)
+            t = False
+        else:
+            (first, second, new_token, max_count) = new_merges(bp_freq, frequencies, n, f, s)
+        if (max_count <= 1 or size_vocab >= vocab_size):
+            break
+        frequencies = new_vocab(frequencies, first, second, new_token)
+        merges_list.append((first, second))
+
+        if ((new_token,) not in vocab_set):
+            vocab_set.add((new_token,))
+            vocab[size_vocab] = new_token
+            size_vocab += 1
+            n = new_token
+            f = first
+            s = second
 
     return (vocab, merges_list)
 
 
     
 
-
-
-run_tokenizer('data/TinyStoriesV2-GPT4-valid.txt', 500, ["<|endoftext|>"])
+if __name__ == "__main__":
+    run_tokenizer('data/TinyStoriesV2-GPT4-valid.txt', 500, ["<|endoftext|>"])
