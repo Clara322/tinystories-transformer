@@ -31,8 +31,7 @@ def token_encode(pre_tokenized_words):
     #print(utf_encoded)
     return utf_encoded
 
-def token_frequencies(utf_encoded) -> dict[tuple[bytes, ...], int]:
-    frequencies: dict[tuple[bytes, ...], int] = {}
+def token_frequencies(frequencies, utf_encoded) -> dict[tuple[bytes, ...], int]:
     for i in utf_encoded:
         key = tuple([bytes([b]) for b in i])
         if key in frequencies.keys():
@@ -116,6 +115,9 @@ def run_tokenizer(input_path: str | os.PathLike, vocab_size: int, special_tokens
 
         # The following is a serial implementation, but you can parallelize this
         # by sending each start/end pair to a set of processes.
+        
+        frequencies: dict[tuple[bytes, ...], int] = {}
+
         for start, end in zip(boundaries[:-1], boundaries[1:]):
             if (size_vocab >= vocab_size):
                 break
@@ -124,25 +126,24 @@ def run_tokenizer(input_path: str | os.PathLike, vocab_size: int, special_tokens
             pattern = "|".join(re.escape(token) for token in special_tokens)
             sub_chunks = re.split(pattern, chunk)
 
-            
             for chunk in sub_chunks:
-                print(chunk)
+                # print(chunk)
 
                 pre_tokenized_words = pre_tokenize(chunk)
                 utf_encoded = token_encode(pre_tokenized_words)
-                frequencies = token_frequencies(utf_encoded)
+                frequencies = token_frequencies(frequencies, utf_encoded)
 
-                while True:
-                    (first, second, new_token, max_count) = merges(frequencies)
-                    if (max_count <= 1 or size_vocab >= vocab_size):
-                        break
-                    frequencies = new_vocab(frequencies, first, second, new_token)
-                    merges_list.append((first, second))
-            
-                    if ((new_token,) not in vocab_set):
-                        vocab_set.add((new_token,))
-                        vocab[size_vocab] = new_token
-                        size_vocab += 1
+        while True:
+            (first, second, new_token, max_count) = merges(frequencies)
+            if (max_count <= 1 or size_vocab >= vocab_size):
+                break
+            frequencies = new_vocab(frequencies, first, second, new_token)
+            merges_list.append((first, second))
+    
+            if ((new_token,) not in vocab_set):
+                vocab_set.add((new_token,))
+                vocab[size_vocab] = new_token
+                size_vocab += 1
 
                     # print(frequencies)
     # print(vocab)
