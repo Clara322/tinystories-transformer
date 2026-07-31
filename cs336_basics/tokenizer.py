@@ -189,9 +189,5 @@ def run_tokenizer(input_path: str | os.PathLike, vocab_size: int, special_tokens
     # print(merges_list)
     return (vocab, merges_list)
 
-
-    
-
-
-
-run_tokenizer('data/TinyStoriesV2-GPT4-valid.txt', 500, ["<|endoftext|>"])
+if __name__ == "__main__":
+    run_tokenizer('data/TinyStoriesV2-GPT4-valid.txt', 500, ["<|endoftext|>"])
