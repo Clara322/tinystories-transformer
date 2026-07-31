@@ -202,8 +202,16 @@ def run_tokenizer(input_path: str | os.PathLike, vocab_size: int, special_tokens
 
     return (vocab, merges_list)
 
+def run_tinystories():
+    vocab, merge_list = run_tokenizer('data/TinyStoriesV2-GPT4-train.txt', 10000, ["<|endoftext|>"])
+    with open('vocabf.txt', 'w') as file:
+      for k in vocab.keys():
+          v = vocab[k]
+          file.write(str(k) + " " + repr(v) + "\n")
 
-    
+    with open('mergesf.txt', 'w') as file:
+      for line in merge_list:
+        file.write(f"{repr(line)}\n")
 
 if __name__ == "__main__":
-    run_tokenizer('data/TinyStoriesV2-GPT4-valid.txt', 500, ["<|endoftext|>"])
+    run_tinystories()
